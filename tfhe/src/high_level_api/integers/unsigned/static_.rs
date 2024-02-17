@@ -100,7 +100,19 @@ static_int_type! {
 
 static_int_type! {
     Unsigned {
+        num_bits: 24,
+    }
+}
+
+static_int_type! {
+    Unsigned {
         num_bits: 32,
+    }
+}
+
+static_int_type! {
+    Unsigned {
+        num_bits: 48,
     }
 }
 
