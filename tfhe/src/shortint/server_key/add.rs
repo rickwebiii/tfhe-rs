@@ -1,6 +1,7 @@
 use super::{CiphertextNoiseDegree, SmartCleaningOperation};
 use crate::core_crypto::algorithms::*;
-use crate::shortint::ciphertext::Degree;
+use crate::insert_add;
+use crate::shortint::ciphertext::{get_next_id, Degree};
 use crate::shortint::server_key::CheckError;
 use crate::shortint::{Ciphertext, MaxNoiseLevel, ServerKey};
 
@@ -383,10 +384,16 @@ pub(crate) fn unchecked_add_assign(
     ct_right: &Ciphertext,
     max_noise_level: MaxNoiseLevel,
 ) {
+    let new_id = get_next_id();
+
+    insert_add(ct_left.id, ct_right.id, new_id);
+
     lwe_ciphertext_add_assign(&mut ct_left.ct, &ct_right.ct);
     ct_left.degree = Degree::new(ct_left.degree.get() + ct_right.degree.get());
     ct_left.set_noise_level(
         ct_left.noise_level() + ct_right.noise_level(),
         max_noise_level,
     );
+
+    ct_left.id = new_id;
 }

@@ -9,7 +9,16 @@ use crate::shortint::parameters::{CarryModulus, MessageModulus};
 use crate::shortint::{CiphertextModulus, PaddingBit, ShortintEncoding};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tfhe_versionable::Versionize;
+
+use crate::insert_clone;
+
+static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
+
+pub fn get_next_id() -> usize {
+    NEXT_ID.fetch_add(1, Ordering::SeqCst)
+}
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Versionize)]
 #[versionize(CiphertextVersions)]
@@ -23,6 +32,7 @@ pub struct Ciphertext {
     pub message_modulus: MessageModulus,
     pub carry_modulus: CarryModulus,
     pub pbs_order: PBSOrder,
+    pub id: usize,
 }
 
 impl crate::named::Named for Ciphertext {
@@ -40,6 +50,7 @@ impl ParameterSetConformant for Ciphertext {
             message_modulus,
             carry_modulus,
             pbs_order,
+            id: _,
         } = self;
 
         ct.is_conformant(&param.ct_params)
@@ -65,7 +76,12 @@ impl Clone for Ciphertext {
             carry_modulus: src_carry_modulus,
             pbs_order: src_pbs_order,
             noise_level: src_noise_level,
+            id: prev_id,
         } = self;
+
+        let next_id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+
+        insert_clone(*prev_id, next_id);
 
         Self {
             ct: src_ct.clone(),
@@ -74,6 +90,7 @@ impl Clone for Ciphertext {
             carry_modulus: *src_carry_modulus,
             pbs_order: *src_pbs_order,
             noise_level: *src_noise_level,
+            id: next_id,
         }
     }
 
@@ -85,6 +102,7 @@ impl Clone for Ciphertext {
             carry_modulus: dst_carry_modulus,
             pbs_order: dst_pbs_order,
             noise_level: dst_noise_level,
+            id,
         } = self;
 
         let Self {
@@ -94,6 +112,7 @@ impl Clone for Ciphertext {
             carry_modulus: src_carry_modulus,
             pbs_order: src_pbs_order,
             noise_level: src_noise_level,
+            id: prev_id,
         } = source;
 
         if dst_ct.ciphertext_modulus() != src_ct.ciphertext_modulus()
@@ -108,6 +127,9 @@ impl Clone for Ciphertext {
         *dst_carry_modulus = *src_carry_modulus;
         *dst_pbs_order = *src_pbs_order;
         *dst_noise_level = *src_noise_level;
+        *id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+
+        insert_clone(*prev_id, *id);
     }
 }
 
@@ -127,6 +149,7 @@ impl Ciphertext {
             message_modulus,
             carry_modulus,
             pbs_order,
+            id: NEXT_ID.fetch_add(1, Ordering::SeqCst),
         }
     }
     pub fn carry_is_empty(&self) -> bool {
@@ -295,6 +318,7 @@ mod tests {
             carry_modulus: CarryModulus(1),
             pbs_order: PBSOrder::KeyswitchBootstrap,
             noise_level: NoiseLevel::NOMINAL,
+            id: 0,
         };
 
         let c2 = Ciphertext {
@@ -307,6 +331,7 @@ mod tests {
             carry_modulus: CarryModulus(2),
             pbs_order: PBSOrder::BootstrapKeyswitch,
             noise_level: NoiseLevel::NOMINAL,
+            id: 0,
         };
 
         assert_ne!(c1, c2);
@@ -327,6 +352,7 @@ mod tests {
             carry_modulus: CarryModulus(1),
             pbs_order: PBSOrder::KeyswitchBootstrap,
             noise_level: NoiseLevel::NOMINAL,
+            id: 0,
         };
 
         let c2 = Ciphertext {
@@ -339,6 +365,7 @@ mod tests {
             carry_modulus: CarryModulus(2),
             pbs_order: PBSOrder::BootstrapKeyswitch,
             noise_level: NoiseLevel::NOMINAL,
+            id: 0,
         };
 
         assert_ne!(c1, c2);
@@ -359,6 +386,7 @@ mod tests {
             carry_modulus: CarryModulus(1),
             pbs_order: PBSOrder::KeyswitchBootstrap,
             noise_level: NoiseLevel::NOMINAL,
+            id: 0,
         };
 
         let c2 = Ciphertext {
@@ -371,6 +399,7 @@ mod tests {
             carry_modulus: CarryModulus(2),
             pbs_order: PBSOrder::BootstrapKeyswitch,
             noise_level: NoiseLevel::NOMINAL,
+            id: 0,
         };
 
         assert_ne!(c1, c2);

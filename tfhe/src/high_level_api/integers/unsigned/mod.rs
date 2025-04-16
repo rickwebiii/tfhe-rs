@@ -36,3 +36,7 @@ mod overflowing_ops;
 pub(crate) mod scalar_ops;
 #[cfg(test)]
 pub(crate) mod tests;
+
+use petgraph::stable_graph::{NodeIndex, StableGraph};
+use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard};

@@ -52,6 +52,7 @@ use crate::shortint::parameters::{
     CarryModulus, CiphertextConformanceParams, CiphertextModulus, MessageModulus,
 };
 use crate::shortint::{EncryptionKeyChoice, PBSOrder, PaddingBit, ShortintEncoding};
+use crate::{insert_trivial, insert_univariate_pbs};
 use aligned_vec::ABox;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter};
@@ -77,7 +78,7 @@ pub use pbs_stats::*;
 use super::backward_compatibility::server_key::{
     SerializableShortintBootstrappingKeyVersions, ServerKeyVersions,
 };
-use super::ciphertext::unchecked_create_trivial_with_lwe_size;
+use super::ciphertext::{get_next_id, unchecked_create_trivial_with_lwe_size};
 use super::parameters::ModulusSwitchNoiseReductionParams;
 use super::PBSParameters;
 
@@ -813,6 +814,12 @@ impl ServerKey {
     }
 
     pub fn apply_lookup_table_assign(&self, ct: &mut Ciphertext, acc: &LookupTableOwned) {
+        let next_id = get_next_id();
+
+        insert_univariate_pbs(ct.id, next_id);
+
+        ct.id = next_id;
+
         if ct.is_trivial() {
             self.trivial_pbs_assign(ct, acc);
             return;
@@ -1121,14 +1128,18 @@ impl ServerKey {
         value: Cleartext<u64>,
         lwe_size: LweSize,
     ) -> Ciphertext {
-        unchecked_create_trivial_with_lwe_size(
+        let ct = unchecked_create_trivial_with_lwe_size(
             value,
             lwe_size,
             self.message_modulus,
             self.carry_modulus,
             self.pbs_order,
             self.ciphertext_modulus,
-        )
+        );
+
+        insert_trivial(ct.id);
+
+        ct
     }
 
     pub fn unchecked_create_trivial(&self, value: u64) -> Ciphertext {

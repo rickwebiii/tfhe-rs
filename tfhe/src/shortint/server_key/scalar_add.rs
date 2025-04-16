@@ -1,6 +1,8 @@
 use super::CiphertextNoiseDegree;
 use crate::core_crypto::algorithms::*;
 use crate::core_crypto::entities::*;
+use crate::insert_scalar_add;
+use crate::shortint::ciphertext::get_next_id;
 use crate::shortint::ciphertext::Degree;
 use crate::shortint::server_key::CheckError;
 use crate::shortint::{Ciphertext, PaddingBit, ServerKey};
@@ -148,6 +150,12 @@ impl ServerKey {
     /// assert_eq!(3, clear);
     /// ```
     pub fn unchecked_scalar_add_assign(&self, ct: &mut Ciphertext, scalar: u8) {
+        let next_id = get_next_id();
+
+        insert_scalar_add(ct.id, next_id);
+
+        ct.id = next_id;
+
         let encoded_scalar = self
             .encoding(PaddingBit::Yes)
             .encode(Cleartext(u64::from(scalar)));

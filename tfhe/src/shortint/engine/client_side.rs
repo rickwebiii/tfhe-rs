@@ -3,6 +3,7 @@ use super::ShortintEngine;
 use crate::core_crypto::algorithms::*;
 use crate::core_crypto::commons::math::random::{Distribution, RandomGenerable};
 use crate::core_crypto::entities::*;
+use crate::insert_input;
 use crate::shortint::ciphertext::{Degree, NoiseLevel};
 use crate::shortint::parameters::{CarryModulus, MessageModulus};
 use crate::shortint::{
@@ -105,14 +106,18 @@ impl ShortintEngine {
             * client_key.parameters.carry_modulus().0)
             / message_modulus.0;
 
-        Ciphertext::new(
+        let ct = Ciphertext::new(
             ct,
             Degree::new(message_modulus.0 - 1),
             NoiseLevel::NOMINAL,
             message_modulus,
             CarryModulus(carry_modulus),
             params_op_order,
-        )
+        );
+
+        insert_input(ct.id);
+
+        ct
     }
 
     pub(crate) fn encrypt_with_message_and_carry_modulus(

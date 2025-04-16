@@ -108,6 +108,17 @@ pub mod integer;
 /// cbindgen:ignore
 pub mod shortint;
 
+use std::{
+    collections::HashMap,
+    sync::{Mutex, MutexGuard},
+};
+
+use petgraph::{
+    algo::toposort,
+    prelude::{NodeIndex, StableGraph},
+    visit::{EdgeRef, NodeRef},
+    Direction,
+};
 #[cfg(feature = "pbs-stats")]
 pub use shortint::server_key::pbs_stats::*;
 
@@ -155,3 +166,314 @@ pub use error::{Error, ErrorKind};
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub use tfhe_versionable::{Unversionize, Versionize};
+
+pub struct TraceCtx {
+    graph: StableGraph<FheOp, ()>,
+    id_map: HashMap<usize, NodeIndex>,
+}
+
+impl TraceCtx {
+    pub fn pbs_critical_path(&self) -> usize {
+        let mut pbs_depth = HashMap::<NodeIndex, usize>::new();
+
+        let nodes = toposort(&self.graph, None).unwrap();
+
+        for n in nodes {
+            let mut max_depth = 0;
+
+            let max_depth = self
+                .graph
+                .edges_directed(n, Direction::Incoming)
+                .map(|e| {
+                    let id = e.source().id();
+                    *pbs_depth.get(&id).unwrap()
+                })
+                .max()
+                .unwrap_or(0);
+
+            let this_depth = match self.graph.node_weight(n).unwrap() {
+                FheOp::Pbs => max_depth + 1,
+                _ => max_depth,
+            };
+
+            pbs_depth.insert(n, this_depth);
+        }
+
+        *pbs_depth.values().max().unwrap()
+    }
+}
+
+pub fn insert_clone(prev: usize, this: usize) {
+    append_node(this, |ctx| {
+        let prev = *ctx.id_map.get(&prev).unwrap();
+
+        let new = ctx.graph.add_node(FheOp::Clone);
+        ctx.graph.add_edge(prev, new, ());
+
+        new
+    });
+}
+
+pub fn insert_input(this: usize) {
+    append_node(this, |ctx| {
+        let node = ctx.graph.add_node(FheOp::Input);
+
+        node
+    });
+}
+
+pub fn insert_add(left: usize, right: usize, this: usize) {
+    append_node(this, |ctx| {
+        let node = ctx.graph.add_node(FheOp::Add);
+        let left = ctx.id_map.get(&left).unwrap();
+        let right = ctx.id_map.get(&right).unwrap();
+
+        ctx.graph.add_edge(*left, node, ());
+        ctx.graph.add_edge(*right, node, ());
+
+        node
+    });
+}
+
+pub fn insert_univariate_pbs(prev: usize, this: usize) {
+    append_node(this, |ctx| {
+        let node = ctx.graph.add_node(FheOp::Pbs);
+        let prev = ctx.id_map.get(&prev).unwrap();
+
+        ctx.graph.add_edge(*prev, node, ());
+
+        node
+    })
+}
+
+pub fn insert_scalar_add(prev: usize, this: usize) {
+    append_node(this, |ctx| {
+        let node = ctx.graph.add_node(FheOp::ScalarAdd);
+        let prev = ctx.id_map.get(&prev).unwrap();
+
+        ctx.graph.add_edge(*prev, node, ());
+
+        node
+    });
+}
+
+pub fn insert_trivial(this: usize) {
+    append_node(this, |ctx| {
+        let node = ctx.graph.add_node(FheOp::Trivial);
+
+        node
+    });
+}
+
+fn append_node<F: Fn(&mut TraceCtx) -> NodeIndex>(id: usize, f: F) {
+    match &mut *get_ctx() {
+        Some(ctx) => {
+            let nid = f(ctx);
+            ctx.id_map.insert(id, nid);
+        }
+        None => {}
+    }
+}
+
+static CTX: Mutex<Option<TraceCtx>> = Mutex::new(None);
+
+pub fn new_ctx() {
+    *CTX.lock().unwrap() = Some(TraceCtx {
+        graph: StableGraph::new(),
+        id_map: HashMap::new(),
+    });
+}
+
+fn get_ctx() -> MutexGuard<'static, Option<TraceCtx>> {
+    CTX.lock().unwrap()
+}
+
+fn dump_ctx(filename: &str) {
+    use petgraph::dot::Config as PetgraphConfig;
+
+    match &*get_ctx() {
+        Some(x) => {
+            let content = format!(
+                "{:?}",
+                petgraph::dot::Dot::with_config(&x.graph, &[PetgraphConfig::EdgeNoLabel])
+            );
+
+            std::fs::write(filename, content).unwrap();
+        }
+        None => {}
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FheOp {
+    Pbs,
+    ScalarAdd,
+    Sub,
+    Add,
+    Clone,
+    Input,
+    Trivial,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        generate_keys,
+        prelude::{FheEncrypt, FheOrd},
+        set_server_key, ConfigBuilder, FheUint8,
+    };
+
+    #[test]
+    fn add_8() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint8::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val + &val;
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("add8");
+    }
+
+    #[test]
+    fn add_16() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint16::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val + &val;
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("add16");
+    }
+
+    #[test]
+    fn add_32() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint32::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val + &val;
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("add32");
+    }
+
+    #[test]
+    fn mul_8() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint8::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val * &val;
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("mul8");
+    }
+
+    #[test]
+    fn mul_16() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint16::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val * &val;
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("mul16");
+    }
+
+    #[test]
+    fn mul_32() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint32::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val * &val;
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("mul32");
+    }
+
+    #[test]
+    fn cmp_8() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint8::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val.lt(&val);
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("lt8");
+    }
+
+    #[test]
+    fn cmp_16() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint16::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val.lt(&val);
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("lt16");
+    }
+
+    #[test]
+    fn cmp_32() {
+        let config = ConfigBuilder::default().build();
+        let (client_key, server_key) = generate_keys(config);
+
+        new_ctx();
+        let val = FheUint32::encrypt(123u8, &client_key);
+
+        set_server_key(server_key);
+
+        let c = &val.lt(&val);
+
+        println!("{}", get_ctx().as_ref().unwrap().pbs_critical_path());
+
+        dump_ctx("lt32");
+    }
+}

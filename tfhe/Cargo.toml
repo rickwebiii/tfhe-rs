@@ -71,6 +71,7 @@ rand_core = { version = "0.6.4", features = ["std"] }
 strum = { version = "0.27", features = ["derive"], optional = true }
 tfhe-zk-pok = { version = "0.6.0", path = "../tfhe-zk-pok", optional = true }
 tfhe-versionable = { version = "0.6.0", path = "../utils/tfhe-versionable" }
+petgraph = "0.8"
 
 # wasm deps
 wasm-bindgen = { workspace = true, features = [
@@ -84,6 +85,7 @@ getrandom = { version = "0.2.8", optional = true }
 bytemuck = { workspace = true }
 
 [features]
+default = ["integer"]
 boolean = []
 shortint = ["dep:sha3"]
 integer = ["shortint", "dep:strum"]
